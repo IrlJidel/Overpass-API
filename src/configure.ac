@@ -21,6 +21,52 @@ AC_PROG_MAKE_SET
 AC_CHECK_LIB([expat], [XML_Parse])
 AC_SEARCH_LIBS([shm_open], [rt])
 
+dnl define a m4 macro to check for perl regular expresion support
+AC_DEFUN([CHECK_LIB_PCRE],[dnl
+AC_MSG_CHECKING([lib pcre])
+AC_ARG_WITH(pcre,
+[  --with-pcre[[=prefix]] builds Overpass API with regular expression support (highly recomended)],,
+     with_pcre="yes")
+if test ".$with_pcre" = ".no" ; then
+  AC_MSG_RESULT([disabled])
+  m4_ifval($2,$2)
+else
+  AC_MSG_RESULT([(testing)])
+  AC_CHECK_LIB(pcre, pcre_study)
+  if test "$ac_cv_lib_pcre_pcre_study" = "yes" ; then
+     PCRE_LIBS="-lpcre"
+     AC_MSG_CHECKING([lib pcre])
+     AC_MSG_RESULT([$PCRE_LIBS])
+     m4_ifval($1,$1)
+  else
+     OLDLDFLAGS="$LDFLAGS" ; LDFLAGS="$LDFLAGS -L$with_pcre/lib"
+     OLDCPPFLAGS="$CPPFLAGS" ; CPPFLAGS="$CPPFLAGS -I$with_pcre/include"
+     AC_CHECK_LIB(pcre, pcre_compile)
+     CPPFLAGS="$OLDCPPFLAGS"
+     LDFLAGS="$OLDLDFLAGS"
+     if test "$ac_cv_lib_pcre_pcre_compile" = "yes" ; then
+        AC_MSG_RESULT(.setting PCRE_LIBS -L$with_pcre/lib -lpcre)
+        PCRE_LIBS="-L$with_pcre/lib -lpcre"
+        test -d "$with_pcre/include" && PCRE_CFLAGS="-I$with_pcre/include"
+        AC_MSG_CHECKING([lib pcre])
+        AC_MSG_RESULT([$PCRE_LIBS])
+        m4_ifval($1,$1)
+     else
+        AC_MSG_CHECKING([lib pcre])
+	AC_MSG_ERROR([Cannot build Overpass API without PCRE. This is mandatory (libpcre3-dev)])
+        m4_ifval($2,$2)
+     fi
+  fi
+fi
+AC_SUBST([PCRE_LIBS])
+AC_SUBST([PCRE_CFLAGS])
+])
+
+dnl check for libpcre support
+CHECK_LIB_PCRE([pcre_found="yes"],[pcre_found="no"])
+AM_CONDITIONAL(ENABLE_PCRE_SUPPORT, test ".$pcre_found" = ".yes")
+
+
 # Checks for header files.
 AC_TYPE_MODE_T
 AC_TYPE_PID_T

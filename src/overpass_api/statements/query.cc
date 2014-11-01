@@ -1660,7 +1660,10 @@ Has_Kv_Statement::Has_Kv_Statement
     
     try
     {
-      key_regex = new Regular_Expression(attributes["regk"], case_sensitive);
+      if (attributes["type"] == "")  // TODO: dummy test, always true
+        key_regex = new Regular_Expression_PCRE(attributes["regk"], case_sensitive);
+      else
+        key_regex = new Regular_Expression_POSIX(attributes["regk"], case_sensitive);
     }
     catch (Regular_Expression_Error e)
     {
@@ -1680,7 +1683,10 @@ Has_Kv_Statement::Has_Kv_Statement
     
     try
     {
-      regex = new Regular_Expression(attributes["regv"], case_sensitive);
+      if (attributes["type"] == "") // TODO: dummy test, always true
+        regex = new Regular_Expression_PCRE(attributes["regv"], case_sensitive);
+      else
+        regex = new Regular_Expression_POSIX(attributes["regv"], case_sensitive);
     }
     catch (Regular_Expression_Error e)
     {

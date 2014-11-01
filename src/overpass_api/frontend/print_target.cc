@@ -271,7 +271,7 @@ class Element_Collector
       : key(key_), value(value_, true), straight(straight_) {}
       
       string key;
-      Regular_Expression value;
+      Regular_Expression_POSIX value;
       bool straight;
     };
     
