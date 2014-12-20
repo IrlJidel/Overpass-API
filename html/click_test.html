@@ -1,0 +1,181 @@
+<html>
+<head>
+  <meta http-equiv="content-type" content="text/html; charset=utf-8" lang="en"></meta>
+  <title>OSM3S Experimental Diff</title>
+  <script src="http://localhost/firebug-lite/content/lite/firebug.js"></script>
+  <script src="changeset_content_request.js"></script>
+  <script src="http_wrapper.js"></script>
+  <script src="osm_to_html.js"></script>
+  <script src="osm_to_ol.js"></script>
+  <script src="osm_xml_parser.js"></script> 
+  <script src="http://localhost/OpenLayers-2.13.1/OpenLayers.debug.js"></script>
+<!--  <script src="http://openlayers.org/api/2.13.1/OpenLayers.js"></script> -->
+  <script src="http://overpass-api.de/OpenStreetMap.js"></script>
+  <script type="text/javascript">
+  
+    var lat = 50.734;
+    var lon = 7.100;
+    var zoom = 18;
+    var map;
+    var layerMapnik = false;   
+    
+    var osm_elements = [];
+
+    
+    function fullDate(date)
+    {
+        var result = date.getUTCFullYear();
+        result += "-";
+
+        var month = date.getUTCMonth() + 1;
+        result += (month <= 9 ? ("0" + month) : month); 
+
+        result += "-";
+
+        var day = date.getUTCDate();
+        result += (day <= 9 ? ("0" + day) : day); 
+
+        result += "T";
+
+        var hour = date.getUTCHours();
+        result += (hour <= 9 ? ("0" + hour) : hour); 
+
+        result += ":";
+
+        var minute = date.getUTCMinutes();
+        result += (minute <= 9 ? ("0" + minute) : minute); 
+
+        result += ":";
+
+        var second = date.getUTCSeconds();
+        result += (second <= 9 ? ("0" + second) : second); 
+
+        result += "Z";
+
+        return result;
+    }
+
+      
+    function refreshData()
+    {
+        var status_bar = document.getElementById("status");
+        if (status_bar && status_bar.innerHTML)
+            status_bar.innerHTML = "parsing your input";
+        
+        var mindate = fullDate(new Date());
+        var select_mindate = document.getElementById("select_mindate");
+        if (select_mindate)
+            mindate = select_mindate.value;
+              
+        var maxdate = "";
+        var select_maxdate = document.getElementById("select_maxdate");
+        if (select_maxdate)
+            maxdate = select_maxdate.value;
+        if (maxdate != "")
+            maxdate = ",\"" + maxdate + "\"";
+
+        var text_area = document.getElementById("textual_results");
+        while (text_area.firstChild)
+            text_area.removeChild(text_area.firstChild);
+        var osm_to_html = OsmToHtml();
+        
+        httpXmlWrapper("http://overpass-api.de/api/interpreter"
+            + "?data=[adiff:\"" + mindate + "\"" + maxdate + "];("
+            + "node(bbox)(changed:\"" + mindate + "\"" + maxdate + ");"
+            + "way(bbox)(changed:\"" + mindate + "\"" + maxdate + ");"
+            + "relation(bbox)(changed:\"" + mindate + "\"" + maxdate + ");"
+            + ");out meta geom(bbox);&bbox="
+            + layerMapnik.getExtent().transform("EPSG:900913", "EPSG:4326").toBBOX(),
+        function(doc)
+        {
+            if (status_bar && status_bar.innerHTML)
+                status_bar.innerHTML = "parsing results";
+                
+            osm_elements = OsmXmlParser().processXml(doc);
+            var osm_to_ol = OsmToOpenLayers(feature_layer, osm_elements);
+                            
+            text_area.appendChild(document.createTextNode("["));
+            var a = document.createElement("a");
+            a.setAttribute("href", "#");
+            a.addEventListener("click",
+            {
+                handleEvent: osm_to_ol.show_all_elements
+            }, false);
+            a.appendChild(document.createTextNode("show all"));
+            text_area.appendChild(a);
+            text_area.appendChild(document.createTextNode("]"));
+            text_area.appendChild(document.createElement("br"));
+                                
+            for (var i = 0; i < osm_elements.length; ++i)
+            {
+                text_area.appendChild(document.createElement("br"));
+                text_area.appendChild(document.createTextNode("["));
+                var a = document.createElement("a");
+                a.setAttribute("href", "#");
+                a.addEventListener("click",
+                {
+                    handleEvent: osm_to_ol.show_single_element_closure(i)
+                }, false);
+                a.appendChild(document.createTextNode("show"));
+                text_area.appendChild(a);
+                text_area.appendChild(document.createTextNode("]"));
+                osm_to_html.print_single_elem(osm_elements[i], text_area);
+                osm_to_ol.add_feature_to_viewport(i);
+            }
+            map.zoomToExtent(osm_to_ol.get_bounds());
+            
+            if (status_bar && status_bar.innerHTML)
+                status_bar.innerHTML = "data complete";
+        });
+        
+        if (status_bar && status_bar.innerHTML)
+            status_bar.innerHTML = "waiting for results";
+    }
+
+    
+    function init()
+    {
+        map = new OpenLayers.Map ("map", {
+              maxExtent: new OpenLayers.Bounds(-20037508.34,-20037508.34,20037508.34,20037508.34),
+              maxResolution: 156543.0399,
+              numZoomLevels: 19,
+              units: 'm',
+              projection: new OpenLayers.Projection("EPSG:900913"),
+              displayProjection: new OpenLayers.Projection("EPSG:4326")
+        } );
+
+        layerMapnik = new OpenLayers.Layer.OSM.Mapnik("Mapnik");
+        map.addLayer(layerMapnik);
+
+        var lonLat = new OpenLayers.LonLat(lon, lat).transform(new OpenLayers.Projection("EPSG:4326"), new OpenLayers.Projection("EPSG:900913"));
+
+        map.setCenter(lonLat, zoom);
+
+        feature_layer = new OpenLayers.Layer.Vector("Changes", { /*style: { fillColor: "#ff0000", strokeColor: "#ff00ff" }*/ });
+        map.addLayers([feature_layer]);
+
+        var yesterday = new Date(new Date().getTime() - 86400*1000);
+        var select_mindate = document.getElementById("select_mindate");
+        if (select_mindate)
+            select_mindate.value = fullDate(yesterday);
+    }
+
+  </script>
+</head>
+<body onload="init()">
+
+<div style="position:absolute; top:0%; left:0%; height:100%; width:30%; z-index:1">
+    <div style="height:20%">
+        <form action="#" acceptCharset="UTF-8">
+            <input type="text" id="select_mindate" value=""></input>
+            <input type="text" id="select_maxdate" value=""></input>
+            <input type="submit" value="Fetch data" onclick="refreshData()"></input>
+        </form>  
+        <strong id="status">&nbsp;</strong>
+    </div>
+    <div id="textual_results" style="height:80%; overflow-y:scroll"></div>
+</div>
+<div id="map" class="smallmap" style="position:absolute; top:0%; left:30%; height:100%; width:70%; z-index:1"></div>
+
+</body>
+</html>
