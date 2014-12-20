@@ -314,6 +314,15 @@ string dump_subquery_map_ql(const string& name, const map< string, string >& att
       result += ":" + attributes.find("ref")->second;
     result += ")";
   }
+  else if (name == "polygon-query")
+  {
+    result += "(poly";
+    if (attributes.find("from") != attributes.end() && attributes.find("from")->second != "_")
+      result += "." + attributes.find("from")->second;
+    if (attributes.find("bounds") != attributes.end() && attributes.find("bounds")->second != "")
+      result += ":\"" + attributes.find("bounds")->second + "\"";
+    result += ")";
+  }
   else
     result += "(" + name + ":)";
   
@@ -525,6 +534,16 @@ string Statement_Dump::dump_compact_map_ql() const
   {
     result += "node" + dump_subquery_map_ql(name_, attributes);
     
+    if (attributes.find("into") != attributes.end() && attributes.find("into")->second != "_")
+      result += "->." + attributes.find("into")->second;
+  }
+  else if (name_ == "polygon-query")
+  {
+    result += "node";
+    result += attributes.find("type")->second;
+
+    result += dump_subquery_map_ql(name_, attributes);
+
     if (attributes.find("into") != attributes.end() && attributes.find("into")->second != "_")
       result += "->." + attributes.find("into")->second;
   }
@@ -751,6 +770,14 @@ string Statement_Dump::dump_bbox_map_ql() const
   {
     result += "node" + dump_subquery_map_ql(name_, attributes) + "(bbox)";
     
+    if (attributes.find("into") != attributes.end() && attributes.find("into")->second != "_")
+      result += "->." + attributes.find("into")->second;
+  }
+  else if (name_ == "polygon-query")
+  {
+    result += "node";
+    result += dump_subquery_map_ql(name_, attributes);
+
     if (attributes.find("into") != attributes.end() && attributes.find("into")->second != "_")
       result += "->." + attributes.find("into")->second;
   }
@@ -986,6 +1013,14 @@ string Statement_Dump::dump_pretty_map_ql() const
   {
     result += "node" + dump_subquery_map_ql(name_, attributes);
     
+    if (attributes.find("into") != attributes.end() && attributes.find("into")->second != "_")
+      result += "->." + attributes.find("into")->second;
+  }
+  else if (name_ == "polygon-query")
+  {
+    result += "node";
+    result += dump_subquery_map_ql(name_, attributes);
+
     if (attributes.find("into") != attributes.end() && attributes.find("into")->second != "_")
       result += "->." + attributes.find("into")->second;
   }
