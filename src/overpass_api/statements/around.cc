@@ -23,6 +23,7 @@
 #include "around.h"
 #include "recurse.h"
 
+
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -598,6 +599,7 @@ void filter_relations_expensive(const Around_Statement& around,
 void Around_Constraint::filter(const Statement& query, Resource_Manager& rman, Set& into, uint64 timestamp)
 {
   around->calc_lat_lons(rman.sets()[around->get_source_name()], *around, rman);
+  around->calc_rtrees();
 
   filter_nodes_expensive(*around, into.nodes);  
   filter_ways_expensive(*around, Way_Geometry_Store(into.ways, query, rman), into.ways);
@@ -1112,6 +1114,51 @@ bool Around_Statement::matches_bboxes(const BBox & bbox_) const
          bbox_.intersects(way_bboxes);
 }
 
+void Around_Statement::calc_rtrees()
+{
+  int index;
+
+  rtree_simple_lat_lons = new RStar::RTree(&st_simple_lat_lons);
+  rtree_simple_segments = new RStar::RTree(&st_simple_segments);
+
+  rtree_simple_lat_lons->create(32, 0.7);
+  rtree_simple_segments->create(32, 0.7);
+
+  index = 0;
+
+  for (vector< pair< BBox, Prepared_Point> >::const_iterator cit = simple_lat_lons.begin();
+      cit != simple_lat_lons.end(); ++cit)
+  {
+    RStar::Rectangle mbr;
+    mbr.min.x = cit->first.min_lat;
+    mbr.min.y = cit->first.min_lon;
+    mbr.max.x = cit->first.max_lat;
+    mbr.max.y = cit->first.max_lon;
+
+    RStar::Object obj;
+    obj.mbr = mbr;
+    obj.id = index++;
+    rtree_simple_lat_lons->insertData(obj);
+  }
+
+  index = 0;
+
+  for (vector< pair< BBox, Prepared_Segment> >::const_iterator
+      it = simple_segments.begin(); it != simple_segments.end(); ++it)
+  {
+    RStar::Rectangle mbr;
+    mbr.min.x = it->first.min_lat;
+    mbr.min.y = it->first.min_lon;
+    mbr.max.x = it->first.max_lat;
+    mbr.max.y = it->first.max_lon;
+
+    RStar::Object obj;
+    obj.mbr = mbr;
+    obj.id = index++;
+    rtree_simple_lat_lons->insertData(obj);
+  }
+}
+
 
 bool Around_Statement::is_inside(double lat, double lon) const
 {
@@ -1131,17 +1178,27 @@ bool Around_Statement::is_inside(double lat, double lon) const
   vector< double > coord_cartesian = cartesian(lat, lon);
   BBox bbox_lat_lon = ::lat_lon_bbox(lat, lon);
 
-  for (vector< pair< BBox, Prepared_Segment> >::const_iterator
-      it = simple_segments.begin(); it != simple_segments.end(); ++it)
+  vector<RStar::Object> objects;
+  RStar::Rectangle range;
+  range.min.x = bbox_lat_lon.min_lat;
+  range.min.y = bbox_lat_lon.min_lon;
+  range.max.x = bbox_lat_lon.max_lat;
+  range.max.y = bbox_lat_lon.max_lon;
+
+  rtree_simple_lat_lons->rangeQuery(objects, range);
+
+  for(vector<RStar::Object>::const_iterator rit = objects.begin(); rit != objects.end(); rit++)
   {
-    if (bbox_lat_lon.intersects(it->first) &&
-        great_circle_line_dist(it->second, coord_cartesian) <= radius)
+    pair< BBox, Prepared_Segment> it = simple_segments[rit->id];
+
+    if (bbox_lat_lon.intersects(it.first) &&
+        great_circle_line_dist(it.second, coord_cartesian) <= radius)
     {
       double gcdist = great_circle_dist
-          (it->second.first_lat, it->second.first_lon, it->second.second_lat, it->second.second_lon);
+          (it.second.first_lat, it.second.first_lon, it.second.second_lat, it.second.second_lon);
       double limit = sqrt(gcdist*gcdist + radius*radius);
-      if (great_circle_dist(lat, lon, it->second.first_lat, it->second.first_lon) <= limit &&
-          great_circle_dist(lat, lon, it->second.second_lat, it->second.second_lon) <= limit)
+      if (great_circle_dist(lat, lon, it.second.first_lat, it.second.first_lon) <= limit &&
+          great_circle_dist(lat, lon, it.second.second_lat, it.second.second_lon) <= limit)
 	return true;
     }
   }
@@ -1154,26 +1211,38 @@ bool Around_Statement::is_inside
 {
   Prepared_Segment segment(first_lat, first_lon, second_lat, second_lon);
   BBox bbox_segment = ::lat_lon_bbox(first_lat, first_lon, second_lat, second_lon);
-  
-  for (vector< pair< BBox, Prepared_Point> >::const_iterator cit = simple_lat_lons.begin();
-      cit != simple_lat_lons.end(); ++cit)
+
+  vector<RStar::Object> objects;
+  RStar::Rectangle range;
+  range.min.x = first_lat;
+  range.min.y = first_lon;
+  range.max.x = second_lat;
+  range.max.y = second_lon;
+
+  rtree_simple_lat_lons->rangeQuery(objects, range);
+
+  for(vector<RStar::Object>::const_iterator rit = objects.begin(); rit != objects.end(); rit++)
   {
-    if (bbox_segment.intersects(cit->first) &&
-        great_circle_line_dist(segment, cit->second.cartesian) <= radius)
+    pair< BBox, Prepared_Point> cit = simple_lat_lons[rit->id];
+
+    if (great_circle_line_dist(segment, cit.second.cartesian) <= radius)
     {
       double gcdist = great_circle_dist(first_lat, first_lon, second_lat, second_lon);
       double limit = sqrt(gcdist*gcdist + radius*radius);
-      if (great_circle_dist(cit->second.lat, cit->second.lon, first_lat, first_lon) <= limit &&
-	  great_circle_dist(cit->second.lat, cit->second.lon, second_lat, second_lon) <= limit)
+      if (great_circle_dist(cit.second.lat, cit.second.lon, first_lat, first_lon) <= limit &&
+	  great_circle_dist(cit.second.lat, cit.second.lon, second_lat, second_lon) <= limit)
         return true;
     }
   }
 
-  for (vector< pair< BBox, Prepared_Segment> >::const_iterator
-      cit = simple_segments.begin(); cit != simple_segments.end(); ++cit)
+  objects.clear();
+  rtree_simple_segments->rangeQuery(objects, range);
+
+  for(vector<RStar::Object>::const_iterator rit = objects.begin(); rit != objects.end(); rit++)
   {
-    if (bbox_segment.intersects(cit->first) &&
-        intersect(cit->second, segment))
+    pair< BBox, Prepared_Segment> cit = simple_segments[rit->id];
+
+    if (intersect(cit.second, segment))
       return true;
   }
   

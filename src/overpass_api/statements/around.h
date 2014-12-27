@@ -24,6 +24,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include "../../lib/rstartree/rstartree.h"
 #include "../data/collect_members.h"
 #include "statement.h"
 
@@ -84,6 +85,7 @@ class Around_Statement : public Output_Statement
         (const Set& input_nodes, Resource_Manager& rman) const;
 
     void calc_lat_lons(const Set& input_nodes, Statement& query, Resource_Manager& rman);
+    void calc_rtrees();
 
     bool is_inside(double lat, double lon) const;
     bool is_inside(double first_lat, double first_lon, double second_lat, double second_lon) const;
@@ -110,6 +112,11 @@ class Around_Statement : public Output_Statement
     vector< Query_Constraint* > constraints;
     vector< BBox > node_bboxes;
     vector< BBox > way_bboxes;
+
+    RStar::Storage st_simple_lat_lons;
+    RStar::Storage st_simple_segments;
+    RStar::RTree * rtree_simple_lat_lons;
+    RStar::RTree * rtree_simple_segments;
 };
 
 #endif
