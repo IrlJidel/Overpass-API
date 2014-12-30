@@ -40,7 +40,7 @@ class Complete_Statement : public Output_Statement
     static Generic_Statement_Maker< Complete_Statement > statement_maker;
     
   private:
-    string input, output;
+    string input, output_iteration, output_complete;
     vector< Statement* > substatements;
 };
 

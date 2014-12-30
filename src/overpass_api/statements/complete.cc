@@ -40,13 +40,14 @@ Complete_Statement::Complete_Statement
 {
   map< string, string > attributes;
   
-  attributes["from"] = "_";
   attributes["into"] = "_";
+  attributes["into_complete"] = "_";
   
   eval_attributes_array(get_name(), attributes, input_attributes);
   
-  input = attributes["from"];
-  output = attributes["into"];
+  input = "_";
+  output_iteration = attributes["into"];
+  output_complete = attributes["into_complete"];
 }
 
 void Complete_Statement::add_statement(Statement* statement, string text)
@@ -62,8 +63,7 @@ void Complete_Statement::add_statement(Statement* statement, string text)
   }
 }
 
-// duplicate code from resource_manager.cc
-uint count_set2(const Set& set_)
+uint count_itemset_entries(const Set& set_)
 {
   uint size(0);
   for (map< Uint32_Index, vector< Node_Skeleton > >::const_iterator
@@ -93,10 +93,8 @@ uint count_set2(const Set& set_)
   return size;
 }
 
-
 void Complete_Statement::execute(Resource_Manager& rman)
 {
-
   bool new_elements_found;
 
   Set result_set;
@@ -104,7 +102,7 @@ void Complete_Statement::execute(Resource_Manager& rman)
 
   do
   {
-    rman.sets()[output] = iteration_base_set;
+    rman.sets()[output_iteration] = iteration_base_set;
 
     rman.push_reference(iteration_base_set);
     for (vector< Statement* >::iterator it(substatements.begin());
@@ -127,7 +125,7 @@ void Complete_Statement::execute(Resource_Manager& rman)
 
     indexed_set_difference(iteration_new_set.areas, result_set.areas);
 
-    new_elements_found = ::count_set2(iteration_new_set) > 0;
+    new_elements_found = ::count_itemset_entries(iteration_new_set) > 0;
 
     iteration_base_set = iteration_new_set;
 
@@ -144,11 +142,10 @@ void Complete_Statement::execute(Resource_Manager& rman)
 
   }  while (new_elements_found);
 
-  transfer_output(rman, result_set);
+  rman.sets()[output_complete].swap(result_set);
+  result_set.clear();
+
   rman.health_check(*this);
-
 }
-
-
 
 
