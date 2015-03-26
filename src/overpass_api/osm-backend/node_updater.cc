@@ -33,48 +33,12 @@
 #include "tags_updater.h"
 
 
-Update_Node_Logger::~Update_Node_Logger()
-{
-  for (map< Node::Id_Type, pair< Node, OSM_Element_Metadata* > >::const_iterator it = insert.begin();
-      it != insert.end(); ++it)
-  {
-    if (it->second.second)
-      delete it->second.second;
-  }
-  for (map< Node::Id_Type, pair< Node, OSM_Element_Metadata* > >::const_iterator it = keep.begin();
-      it != keep.end(); ++it)
-  {
-    if (it->second.second)
-      delete it->second.second;
-  }
-  for (map< Node::Id_Type, pair< Node, OSM_Element_Metadata* > >::const_iterator it = erase.begin();
-      it != erase.end(); ++it)
-  {
-    if (it->second.second)
-      delete it->second.second;
-  }
-}
-
-
 // New node_updater:
 
 
 bool geometrically_equal(const Node_Skeleton& a, const Node_Skeleton& b)
 {
   return (a.ll_lower == b.ll_lower);
-}
-
-
-// TODO: temporary helper function for update_logger
-void tell_update_logger_insertions
-    (const Data_By_Id< Node_Skeleton >::Entry& entry, Update_Node_Logger* update_logger)
-{
-  if (update_logger)
-  {
-    Node node(entry.elem.id, entry.idx.val(), entry.elem.ll_lower);
-    node.tags = entry.tags;
-    update_logger->insertion(node);
-  }
 }
 
 
@@ -500,8 +464,7 @@ Node_Updater::Node_Updater(string db_dir_, meta_modes meta_)
 }
 
 
-void Node_Updater::update(Osm_Backend_Callback* callback, bool partial,
-			  Update_Node_Logger* update_logger)
+void Node_Updater::update(Osm_Backend_Callback* callback, bool partial)
 {
   if (!external_transaction)
     transaction = new Nonsynced_Transaction(true, false, db_dir, "");
@@ -535,7 +498,7 @@ void Node_Updater::update(Osm_Backend_Callback* callback, bool partial,
   attic_skeletons.clear();
   new_skeletons.clear();
   new_current_skeletons(new_data, existing_map_positions, existing_skeletons,
-      (update_logger != 0), attic_skeletons, new_skeletons, moved_nodes, update_logger);
+      0, attic_skeletons, new_skeletons, moved_nodes);
       
   // Compute which meta data really has changed
   std::map< Uint31_Index, std::set< OSM_Element_Metadata_Skeleton< Node_Skeleton::Id_Type > > > attic_meta;
@@ -545,7 +508,7 @@ void Node_Updater::update(Osm_Backend_Callback* callback, bool partial,
   // Compute which tags really have changed
   std::map< Tag_Index_Local, std::set< Node_Skeleton::Id_Type > > attic_local_tags;
   std::map< Tag_Index_Local, std::set< Node_Skeleton::Id_Type > > new_local_tags;
-  new_current_local_tags< Node_Skeleton, Update_Node_Logger, Node_Skeleton::Id_Type >
+  new_current_local_tags< Node_Skeleton, Node_Skeleton::Id_Type >
       (new_data, existing_map_positions, existing_local_tags, attic_local_tags, new_local_tags);
   std::map< Tag_Index_Global, std::set< Tag_Object_Global< Node_Skeleton::Id_Type > > > attic_global_tags;
   std::map< Tag_Index_Global, std::set< Tag_Object_Global< Node_Skeleton::Id_Type > > > new_global_tags;
@@ -557,23 +520,7 @@ void Node_Updater::update(Osm_Backend_Callback* callback, bool partial,
       = new_idx_positions(new_data);
   // TODO: old code
   map< uint32, vector< Node::Id_Type > > to_delete;
-  update_node_ids(to_delete, (update_logger != 0), new_map_positions);
-
-  // TODO: old code
-//   if (update_logger && meta)
-//   {
-//     for (vector< pair< OSM_Element_Metadata_Skeleton< Node::Id_Type >, uint32 > >::const_iterator
-//         it = nodes_meta_to_insert.begin(); it != nodes_meta_to_insert.end(); ++it)
-//     {
-//       OSM_Element_Metadata meta;
-//       meta.version = it->first.version;
-//       meta.timestamp = it->first.timestamp;
-//       meta.changeset = it->first.changeset;
-//       meta.user_id = it->first.user_id;
-//       meta.user_name = user_by_id[it->first.user_id];
-//       update_logger->insertion(it->first.ref, meta);
-//     }
-//   }
+  update_node_ids(to_delete, 0, new_map_positions);
 
   callback->update_started();
   callback->prepare_delete_tags_finished();
@@ -585,16 +532,15 @@ void Node_Updater::update(Osm_Backend_Callback* callback, bool partial,
   callback->update_ids_finished();
   
   // Update skeletons
-  update_elements(attic_skeletons, new_skeletons, *transaction, *osm_base_settings().NODES, update_logger);
+  update_elements(attic_skeletons, new_skeletons, *transaction, *osm_base_settings().NODES);
   callback->update_coords_finished();
   
   // Update meta
   if (meta)
-    update_elements(attic_meta, new_meta, *transaction, *meta_settings().NODES_META, update_logger);
+    update_elements(attic_meta, new_meta, *transaction, *meta_settings().NODES_META);
   
   // Update local tags
-  update_elements(attic_local_tags, new_local_tags, *transaction, *osm_base_settings().NODE_TAGS_LOCAL,
-                  update_logger);
+  update_elements(attic_local_tags, new_local_tags, *transaction, *osm_base_settings().NODE_TAGS_LOCAL);
   callback->tags_local_finished();
   
   // Update global tags
@@ -680,14 +626,6 @@ void Node_Updater::update(Osm_Backend_Callback* callback, bool partial,
   {
     copy_idxs_by_id(new_meta, idxs_by_id);
     process_user_data(*transaction, user_by_id, idxs_by_id);
-    
-//     if (update_logger)
-//     {
-//       stable_sort(nodes_meta_to_delete.begin(), nodes_meta_to_delete.begin());
-//       nodes_meta_to_delete.erase(unique(nodes_meta_to_delete.begin(), nodes_meta_to_delete.end()),
-// 				 nodes_meta_to_delete.end());
-//       update_logger->set_delete_meta_data(nodes_meta_to_delete);
-//     }
   }
   callback->update_finished();
   
