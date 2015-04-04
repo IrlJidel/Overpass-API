@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <vector>
@@ -13,11 +14,18 @@ LZ4_Deflate::~LZ4_Deflate() { }
 
 int LZ4_Deflate::compress(const void* in, int in_size, void* out, int out_buffer_size)
 {
-   int ret = LZ4_compress_limitedOutput((const char*) in, (char *) out + 4, in_size, out_buffer_size - 4);
+     int ret = LZ4_compress_limitedOutput((const char*) in, (char *) out + 4, in_size, out_buffer_size - 4);
+
    if (ret == 0)    // buffer is too small, skip compression
    {
      if (in_size > out_buffer_size - 4)
+     {
+       std::cout << "compress: " << in_size << " -- " << out_buffer_size << "\n";
+       std::ofstream output ("smallbuffer.bin", std::ios::binary|std::ios::out);
+       output.write((const char*) in, in_size);
+       output.close();
        throw Error (-5);     // buffer too small, abort processing
+     }
 
      *(int*)out = in_size * -1;
      std::memcpy ((char *) out + 4, (const char*)in, in_size);

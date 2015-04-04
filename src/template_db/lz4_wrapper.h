@@ -1,7 +1,7 @@
 #ifndef DE__OSM3S___TEMPLATE_DB__LZ4_WRAPPER_H
 #define DE__OSM3S___TEMPLATE_DB__LZ4_WRAPPER_H
 
-#include "lz4.h"
+#include "../lib/lz4/lz4.h"
 
 #include <exception>
 

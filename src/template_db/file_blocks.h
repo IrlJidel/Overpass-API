@@ -514,7 +514,7 @@ File_Blocks< TIndex, TIterator, TRangeIterator >::File_Blocks
      data_file(index->get_data_file_name(),
 	       writeable ? O_RDWR|O_CREAT : O_RDONLY,
 	       S_666, "File_Blocks::File_Blocks::1"),
-     buffer(index->get_block_size() * index->get_max_size())
+     buffer(index->get_block_size() * index->get_max_size() * 2)           // increased buffer size
 {
   // cerr<<"  "<<index->get_data_file_name()<<'\n'; //Debug
   
@@ -734,7 +734,7 @@ typename File_Blocks< TIndex, TIterator, TRangeIterator >::Discrete_Iterator
   else if (compression_method == File_Blocks_Index< TIndex >::LZ4_COMPRESSION)
   {
     target = buffer.ptr;
-    data_size = (LZ4_Deflate().compress(buf, *(uint32*)buf, target, block_size * max_size) - 1) / block_size + 1;
+    data_size = (LZ4_Deflate().compress(buf, *(uint32*)buf, target, block_size * max_size * 2) - 1) / block_size + 1;
   }
     
   uint32 pos = allocate_block(data_size);
@@ -782,7 +782,7 @@ typename File_Blocks< TIndex, TIterator, TRangeIterator >::Discrete_Iterator
     else if (compression_method == File_Blocks_Index< TIndex >::LZ4_COMPRESSION)
     {
       target = buffer.ptr;
-      data_size = (LZ4_Deflate().compress(buf, *(uint32*)buf, target, block_size * max_size) - 1) / block_size + 1;
+      data_size = (LZ4_Deflate().compress(buf, *(uint32*)buf, target, block_size * max_size * 2) - 1) / block_size + 1;
     }
     
     it.block_it->pos = allocate_block(data_size);
