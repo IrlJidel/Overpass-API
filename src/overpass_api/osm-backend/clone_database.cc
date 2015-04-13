@@ -79,12 +79,12 @@ void clone_map_file(const File_Properties& file_prop, Transaction& transaction, 
     Random_File_Index& src_idx = *transaction.random_index(&file_prop);
     Random_File< TIndex > src_file(&src_idx);
 
-    Random_File_Index dest_idx(file_prop, true, false, dest_db_dir);
+    Random_File_Index dest_idx(file_prop, true, false, dest_db_dir, "");
     Random_File< TIndex > dest_file(&dest_idx);
     
     for (vector< uint32 >::size_type i = 0; i < src_idx.blocks.size(); ++i)
     {
-      if (src_idx.blocks[i] != src_idx.npos)
+      if (src_idx.blocks[i].index != src_idx.npos)
       {
 	for (uint32 j = 0; j < src_idx.get_block_size()/TIndex::max_size_of(); ++j)
 	{

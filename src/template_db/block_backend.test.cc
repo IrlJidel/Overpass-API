@@ -185,6 +185,16 @@ struct Test_File : File_Properties
     return 16;
   }
   
+  uint32 get_map_max_size() const
+  {
+    return 1;
+  }
+
+  uint32 get_map_compression_method() const
+  {
+    return 0;
+  }
+
   vector< bool > get_data_footprint(const string& db_dir) const
   {
     return vector< bool >();
