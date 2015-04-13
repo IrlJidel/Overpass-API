@@ -36,19 +36,24 @@ struct Random_File_Index
 {
   public:
     Random_File_Index(const File_Properties& file_prop,
-		      bool writeable, bool use_shadow, string db_dir);
+		      bool writeable, bool use_shadow,
+		      const std::string& db_dir, const std::string& file_name_extension);
     ~Random_File_Index();
     bool writeable() const { return (empty_index_file_name != ""); }
+    const std::string& file_name_extension() const { return file_name_extension_; }
+
     
-    string get_map_file_name() const { return map_file_name; }
+    std::string get_map_file_name() const { return map_file_name; }
     uint64 get_block_size() const { return block_size_; }
+    uint32 get_compression_method() const { return compression_method; }
     
     typedef uint32 size_t;
     
   private:
-    string index_file_name;
-    string empty_index_file_name;
-    string map_file_name;
+    std::string index_file_name;
+    std::string empty_index_file_name;
+    std::string map_file_name;
+    std::string file_name_extension_;
     
   public:
     vector< size_t > blocks;
@@ -59,6 +64,13 @@ struct Random_File_Index
     const size_t npos;
     
     uint count;
+    uint32 max_size;             // TODO: needed?
+    int compression_method;
+
+    static const int FILE_FORMAT_VERSION = 7512;
+    static const int NO_COMPRESSION = 0;
+    static const int ZLIB_COMPRESSION = 1;
+    static const int LZ4_COMPRESSION = 2;
 };
 
 inline vector< bool > get_map_index_footprint
@@ -68,7 +80,8 @@ inline vector< bool > get_map_index_footprint
 
 inline Random_File_Index::Random_File_Index
     (const File_Properties& file_prop,
-     bool writeable, bool use_shadow, string db_dir) :
+     bool writeable, bool use_shadow,
+     const std::string& db_dir, const std::string& file_name_extension) :
     index_file_name(db_dir + file_prop.get_file_name_trunk()
         + file_prop.get_id_suffix()
         + file_prop.get_index_suffix()
@@ -78,14 +91,18 @@ inline Random_File_Index::Random_File_Index
         + file_prop.get_shadow_suffix() : ""),
     map_file_name(db_dir + file_prop.get_file_name_trunk()
         + file_prop.get_id_suffix()),
+    file_name_extension_(file_name_extension),
     block_count(0),
     block_size_(file_prop.get_map_block_size()),
-    npos(numeric_limits< size_t >::max()), count(0)
+    npos(numeric_limits< size_t >::max()), count(0),
+    compression_method(file_prop.get_compression_method())
 {
+  uint64 file_size = 0;
   try
   {
     Raw_File val_file(map_file_name, O_RDONLY, S_666, "Random_File:8");
-    block_count = val_file.size("Random_File:9")/block_size_;
+    file_size = val_file.size("Random_File:9");
+    block_count = file_size/block_size_;
   }
   catch (File_Error e)
   {
@@ -107,20 +124,52 @@ inline Random_File_Index::Random_File_Index
     Void_Pointer< uint8 > index_buf(index_size);
     source_file.read(index_buf.ptr, index_size, "Random_File:14");
     
-    uint32 pos = 0;
-    while (pos < index_size)
+    if (file_name_extension == ".legacy")
+      // We support this way the old format although it has no version marker.
     {
-      size_t* entry = (size_t*)(index_buf.ptr+pos);
-      blocks.push_back(*entry);
-      if (*entry != npos)
+      uint32 pos = 0;
+      while (pos < index_size)
       {
-	if (*entry > block_count)
-	  throw File_Error
-	      (0, index_file_name, "Random_File: bad pos in index file");
-	else
-	  is_referred[*entry] = true;
+        size_t* entry = (size_t*)(index_buf.ptr+pos);
+        blocks.push_back(*entry);
+        if (*entry != npos)
+        {
+          if (*entry > block_count)
+            throw File_Error
+            (0, index_file_name, "Random_File: bad pos in index file");
+          else
+            is_referred[*entry] = true;
+        }
+        pos += sizeof(size_t);
       }
-      pos += sizeof(size_t);
+    }
+    else if (index_size > 0)
+    {
+      if (*(int32*)index_buf.ptr != FILE_FORMAT_VERSION)
+    throw File_Error(0, index_file_name, "Random_File_Index: Unsupported index file format version");
+      block_size_ = 1ull<<*(uint8*)(index_buf.ptr + 4);
+      max_size = 1u<<*(uint8*)(index_buf.ptr + 5);    // TODO: needed ??
+      compression_method = *(uint16*)(index_buf.ptr + 6);
+
+      block_count = file_size / block_size_;
+      is_referred.resize(block_count, false);
+
+      uint32 pos = 8;
+      while (pos < index_size)
+      {
+        size_t* entry = (size_t*)(index_buf.ptr + pos);  // TODO: check offset
+        blocks.push_back(*entry);
+        if (*entry != npos)
+        {
+          if (*entry > block_count)
+            throw File_Error
+            (0, index_file_name, "Random_File: bad pos in index file");
+          else
+            is_referred[*entry] = true;
+        }
+        pos += sizeof(size_t);
+      }
+
     }
   }
   catch (File_Error e)
@@ -159,17 +208,36 @@ inline Random_File_Index::Random_File_Index
   }
 }
 
+template< typename Int >
+int shift_log2(Int val)    // TODO: cleanup
+{
+  int count = 0;
+  while (val > 1)
+  {
+    val = val>>1;
+    ++count;
+  }
+  return count;
+}
+
 inline Random_File_Index::~Random_File_Index()
 {
   if (empty_index_file_name == "")
     return;
 
-  // Write index file
-  uint32 index_size = blocks.size()*sizeof(size_t);
-  uint32 pos = 0;
- 
+  // Keep space for file version and size information
+  uint32 index_size = 8;
+  uint32 pos = 8;
+
+  index_size += blocks.size()*sizeof(size_t);
+
   Void_Pointer< uint8 > index_buf(index_size);
   
+  *(uint32*)index_buf.ptr = FILE_FORMAT_VERSION;
+  *(uint8*)(index_buf.ptr + 4) = shift_log2(block_size_);
+  *(uint8*)(index_buf.ptr + 5) = shift_log2(max_size);  // TODO: needed?
+  *(uint16*)(index_buf.ptr + 6) = compression_method;
+
   for (vector< size_t >::const_iterator it(blocks.begin()); it != blocks.end();
       ++it)
   {
@@ -202,7 +270,7 @@ inline Random_File_Index::~Random_File_Index()
 inline vector< bool > get_map_index_footprint
     (const File_Properties& file_prop, string db_dir, bool use_shadow = false)
 {
-  Random_File_Index index(file_prop, false, use_shadow, db_dir);
+  Random_File_Index index(file_prop, false, use_shadow, db_dir, "");
   
   vector< bool > result(index.block_count, true);
   for (vector< uint32 >::const_iterator it(index.void_blocks.begin());

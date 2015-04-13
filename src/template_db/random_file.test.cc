@@ -350,7 +350,7 @@ int main(int argc, char* args[])
   }
   if ((test_to_execute == "") || (test_to_execute == "8"))
     read_test();
-  
+
   remove((BASE_DIRECTORY + Test_File().get_file_name_trunk()
       + Test_File().get_id_suffix()).c_str());
   remove((BASE_DIRECTORY + Test_File().get_file_name_trunk()
