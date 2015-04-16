@@ -21,6 +21,8 @@
 
 #include "random_file_index.h"
 #include "types.h"
+#include "zlib_wrapper.h"
+#include "lz4_wrapper.h"
 
 #include <unistd.h>
 
@@ -57,7 +59,10 @@ private:
   Void_Pointer< uint8 > cache;
   size_t cache_pos, block_size;
   
+  Void_Pointer< void > buffer;
+
   void move_cache_window(size_t pos);
+  uint32 allocate_block(uint32 data_size);
 };
 
 /** Implementation Random_File: ---------------------------------------------*/
@@ -70,7 +75,8 @@ Random_File< TVal >::Random_File(Random_File_Index* index_)
 	   S_666, "Random_File:3"),
   index(index_),
   cache(index_->get_block_size()), cache_pos(index->npos),
-  block_size(index_->get_block_size())
+  block_size(index_->get_block_size()),
+  buffer(index_->get_block_size() * 2)                  // TODO
 {}
 
 template< class TVal >
@@ -107,22 +113,27 @@ void Random_File< TVal >::move_cache_window(size_t pos)
 
   if (changed)
   {
-    // Find an empty position.
-    uint32 disk_pos;
-    if (index->void_blocks.empty())
-    {
-      disk_pos = index->block_count;
-      ++(index->block_count);
-    }
-    else
-    {
-      disk_pos = index->void_blocks.back();
-      index->void_blocks.pop_back();
-    }
+    void* buf;   // TODO
+
+    uint32 data_size = *(uint32*)buf == 0 ? 0 : ((*(uint32*)buf) - 1) / block_size + 1;
     
+    void* target = buf;
+    if (index->compression_method == Random_File_Index::ZLIB_COMPRESSION)
+    {
+      target = buffer.ptr;
+      data_size = (Zlib_Deflate(1).compress(buf, *(uint32*)buf, target, block_size /*  max_size */) - 1) / block_size + 1;
+    }
+    else if (index->compression_method == Random_File_Index::LZ4_COMPRESSION)
+    {
+      target = buffer.ptr;
+      data_size = (LZ4_Deflate().compress(buf, *(uint32*)buf, target, block_size /* * max_size */ * 2) - 1) / block_size + 1;
+    }
+
+    uint32 disk_pos = allocate_block(data_size);
+
     // Save the found position to the index.
     if (index->blocks.size() <= cache_pos)
-      index->blocks.resize(cache_pos+1, index->npos);
+      index->blocks.resize(cache_pos+1, Random_File_Index_Entry(index->npos));
     index->blocks[cache_pos] = disk_pos;
     
     // Write the data at the found position.
@@ -134,7 +145,7 @@ void Random_File< TVal >::move_cache_window(size_t pos)
   if (pos == index->npos)
     return;
   
-  if ((index->blocks.size() <= pos) || (index->blocks[pos] == index->npos))
+  if ((index->blocks.size() <= pos) || (index->blocks[pos].index == index->npos))
   {
     // Reset the whole cache to zero.
     for (uint32 i = 0; i < block_size; ++i)
@@ -142,10 +153,98 @@ void Random_File< TVal >::move_cache_window(size_t pos)
   }
   else
   {
-    val_file.seek((int64)(index->blocks[pos])*block_size, "Random_File:23");
-    val_file.read(cache.ptr, block_size, "Random_File:24");
+    val_file.seek((int64)(index->blocks[pos].pos)*block_size, "Random_File:23");
+    if (index->compression_method == Random_File_Index::NO_COMPRESSION)
+      val_file.read(cache.ptr, block_size * index->blocks[pos].size, "Random_File:24");
+    else if (index->compression_method == Random_File_Index::ZLIB_COMPRESSION)
+    {
+      Void_Pointer< void > input(block_size * index->blocks[pos].size);
+      val_file.read(cache.ptr, block_size * index->blocks[pos].size, "Random_File:24");
+      Zlib_Inflate().decompress(input.ptr, block_size * index->blocks[pos].size, buffer.ptr, block_size /* * max_size */);  // TODO: FIX!!
+    }
+    else if (index->compression_method == Random_File_Index::LZ4_COMPRESSION)
+    {
+      Void_Pointer< void > input(block_size * index->blocks[pos].size);
+      val_file.read(cache.ptr, block_size * index->blocks[pos].size, "Random_File:24");
+      LZ4_Inflate().decompress(input.ptr, block_size * index->blocks[pos].size, buffer.ptr, block_size /* * max_size */); // TODO: FIX!!
+    }
   }
   cache_pos = pos;
+}
+
+template< typename Iterator, typename Object >
+void rearrange_block2(const Iterator& begin, Iterator& it, Object to_move)
+{
+  Iterator predecessor = it;
+  if (it != begin)
+    --predecessor;
+  while (to_move < *predecessor)
+  {
+    *it = *predecessor;
+    --it;
+    if (it == begin)
+      break;
+    --predecessor;
+  }
+  *it = to_move;
+}
+
+
+// Finds an appropriate block, removes it from the list of available blocks, and returns it
+template< typename TIndex>
+uint32 Random_File< TIndex >::allocate_block(uint32 data_size)
+{
+  uint32 result = this->index->block_count;
+
+  if (this->index->void_blocks.empty())
+    this->index->block_count += data_size;
+  else
+  {
+    std::vector< std::pair< uint32, uint32 > >::iterator pos_it
+    = std::lower_bound(this->index->void_blocks.begin(), this->index->void_blocks.end(),
+        std::make_pair(data_size, uint32(0)));
+
+    if (pos_it != this->index->void_blocks.end() && pos_it->first == data_size)
+    {
+      // We have a gap of exactly the needed size.
+      result = pos_it->second;
+      this->index->void_blocks.erase(pos_it);
+    }
+    else
+    {
+      pos_it = --(this->index->void_blocks.end());
+      uint32 last_size = pos_it->first;
+      while (pos_it != this->index->void_blocks.begin() && last_size > data_size)
+      {
+        --pos_it;
+        if (last_size == pos_it->first)
+        {
+          // We have a gap size that appears twice (or more often).
+          // This is a good heuristic choice.
+          result = pos_it->second;
+          pos_it->first -= data_size;
+          pos_it->second += data_size;
+          rearrange_block2(this->index->void_blocks.begin(), pos_it, *pos_it);
+          return result;
+        }
+        last_size = pos_it->first;
+      }
+
+      pos_it = --(this->index->void_blocks.end());
+      if (pos_it->first >= data_size)
+      {
+        // If no really matching block exists then we choose the largest one.
+        result = pos_it->second;
+        pos_it->first -= data_size;
+        pos_it->second += data_size;
+        rearrange_block2(this->index->void_blocks.begin(), pos_it, *pos_it);
+      }
+      else
+        this->index->block_count += data_size;
+    }
+  }
+
+  return result;
 }
 
 #endif
