@@ -53,13 +53,14 @@ public:
 private:
   bool changed;
   uint32 index_size;
+  uint32 max_size;
   
   Raw_File val_file;
   Random_File_Index* index;
   Void_Pointer< uint8 > cache;
   size_t cache_pos, block_size;
   
-  Void_Pointer< void > buffer;
+  Void_Pointer< uint8 > buffer;
 
   void move_cache_window(size_t pos);
   uint32 allocate_block(uint32 data_size);
@@ -74,9 +75,10 @@ Random_File< TVal >::Random_File(Random_File_Index* index_)
 	   index_->writeable() ? O_RDWR|O_CREAT : O_RDONLY,
 	   S_666, "Random_File:3"),
   index(index_),
-  cache(index_->get_block_size()), cache_pos(index->npos),
+  cache(index_->get_block_size() * index_->get_max_size()), cache_pos(index->npos),
   block_size(index_->get_block_size()),
-  buffer(index_->get_block_size() * 2)                  // TODO
+  max_size(index_->get_max_size()),
+  buffer(index_->get_block_size() * index_->get_max_size() * 2)
 {}
 
 template< class TVal >
@@ -89,8 +91,8 @@ Random_File< TVal >::~Random_File()
 template< class TVal >
 TVal Random_File< TVal >::get(size_t pos)
 {
-  move_cache_window(pos / (block_size/index_size));  
-  return TVal(cache.ptr + (pos % (block_size/index_size))*index_size);
+  move_cache_window(pos / (block_size*max_size /index_size));
+  return TVal(cache.ptr + (pos % (block_size*max_size/index_size))*index_size);
 }
 
 template< class TVal >
@@ -99,8 +101,8 @@ void Random_File< TVal >::put(size_t pos, const TVal& val)
   if (!index->writeable())
     throw File_Error(0, index->get_map_file_name(), "Random_File:2");
   
-  move_cache_window(pos / (block_size/index_size));
-  val.to_data(cache.ptr + (pos % (block_size/index_size))*index_size);
+  move_cache_window(pos / (block_size*max_size/index_size));
+  val.to_data(cache.ptr + (pos % (block_size*max_size/index_size))*index_size);
   changed = true;
 }
 
@@ -113,20 +115,24 @@ void Random_File< TVal >::move_cache_window(size_t pos)
 
   if (changed)
   {
-    void* buf;   // TODO
-
-    uint32 data_size = *(uint32*)buf == 0 ? 0 : ((*(uint32*)buf) - 1) / block_size + 1;
+    uint32 data_size;
     
-    void* target = buf;
-    if (index->compression_method == Random_File_Index::ZLIB_COMPRESSION)
+    void* target;
+
+    if (index->compression_method == Random_File_Index::NO_COMPRESSION)
+    {
+       target = cache.ptr;
+       data_size = max_size;
+    }
+    else if (index->compression_method == Random_File_Index::ZLIB_COMPRESSION)
     {
       target = buffer.ptr;
-      data_size = (Zlib_Deflate(1).compress(buf, *(uint32*)buf, target, block_size /*  max_size */) - 1) / block_size + 1;
+      data_size = (Zlib_Deflate(1).compress(cache.ptr, block_size * max_size, target, block_size * index->max_size) - 1) / block_size + 1;
     }
     else if (index->compression_method == Random_File_Index::LZ4_COMPRESSION)
     {
       target = buffer.ptr;
-      data_size = (LZ4_Deflate().compress(buf, *(uint32*)buf, target, block_size /* * max_size */ * 2) - 1) / block_size + 1;
+      data_size = (LZ4_Deflate().compress(cache.ptr, block_size * max_size, target, block_size * index->max_size * 2) - 1) / block_size + 1;
     }
 
     uint32 disk_pos = allocate_block(data_size);
@@ -134,11 +140,12 @@ void Random_File< TVal >::move_cache_window(size_t pos)
     // Save the found position to the index.
     if (index->blocks.size() <= cache_pos)
       index->blocks.resize(cache_pos+1, Random_File_Index_Entry(index->npos));
-    index->blocks[cache_pos] = disk_pos;
+    Random_File_Index_Entry entry(cache_pos, disk_pos, data_size);
+    index->blocks[cache_pos] = entry;
     
     // Write the data at the found position.
     val_file.seek((int64)disk_pos*block_size, "Random_File:21");
-    val_file.write(cache.ptr, block_size, "Random_File:22");
+    val_file.write((uint8*)target, block_size * data_size, "Random_File:22");
   }
   changed = false;
   
@@ -148,7 +155,7 @@ void Random_File< TVal >::move_cache_window(size_t pos)
   if ((index->blocks.size() <= pos) || (index->blocks[pos].index == index->npos))
   {
     // Reset the whole cache to zero.
-    for (uint32 i = 0; i < block_size; ++i)
+    for (uint32 i = 0; i < block_size * max_size; ++i)
       *(cache.ptr + i) = 0;
   }
   else
@@ -158,15 +165,13 @@ void Random_File< TVal >::move_cache_window(size_t pos)
       val_file.read(cache.ptr, block_size * index->blocks[pos].size, "Random_File:24");
     else if (index->compression_method == Random_File_Index::ZLIB_COMPRESSION)
     {
-      Void_Pointer< void > input(block_size * index->blocks[pos].size);
-      val_file.read(cache.ptr, block_size * index->blocks[pos].size, "Random_File:24");
-      Zlib_Inflate().decompress(input.ptr, block_size * index->blocks[pos].size, buffer.ptr, block_size /* * max_size */);  // TODO: FIX!!
+      val_file.read(buffer.ptr, block_size * index->blocks[pos].size, "Random_File:24");
+      Zlib_Inflate().decompress(buffer.ptr, block_size * index->blocks[pos].size, cache.ptr, block_size * index->max_size);
     }
     else if (index->compression_method == Random_File_Index::LZ4_COMPRESSION)
     {
-      Void_Pointer< void > input(block_size * index->blocks[pos].size);
-      val_file.read(cache.ptr, block_size * index->blocks[pos].size, "Random_File:24");
-      LZ4_Inflate().decompress(input.ptr, block_size * index->blocks[pos].size, buffer.ptr, block_size /* * max_size */); // TODO: FIX!!
+      val_file.read(buffer.ptr, block_size * index->blocks[pos].size, "Random_File:24");
+      LZ4_Inflate().decompress(buffer.ptr, block_size * index->blocks[pos].size, cache.ptr, block_size * index->max_size);
     }
   }
   cache_pos = pos;

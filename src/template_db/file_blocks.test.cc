@@ -146,6 +146,16 @@ struct Test_File : File_Properties
     return 16;
   }
   
+  uint32 get_map_max_size() const
+  {
+    return 1;
+  }
+
+  uint32 get_map_compression_method() const
+  {
+    return File_Blocks_Index< IntIndex >::NO_COMPRESSION;
+  }
+
   vector< bool > get_data_footprint(const string& db_dir) const
   {
     return vector< bool >();
@@ -224,6 +234,16 @@ struct Variable_Block_Test_File : File_Properties
     return 16;
   }
   
+  uint32 get_map_max_size() const
+  {
+    return 8;
+  }
+
+  uint32 get_map_compression_method() const
+  {
+    return File_Blocks_Index< IntIndex >::NO_COMPRESSION;
+  }
+
   vector< bool > get_data_footprint(const string& db_dir) const
   {
     return vector< bool >();
@@ -300,6 +320,16 @@ struct Compressed_Test_File : File_Properties
   uint32 get_map_block_size() const
   {
     return 4*1024;
+  }
+
+  uint32 get_map_max_size() const
+  {
+    return 4;
+  }
+
+  uint32 get_map_compression_method() const
+  {
+    return File_Blocks_Index< IntIndex >::LZ4_COMPRESSION;
   }
   
   vector< bool > get_data_footprint(const string& db_dir) const
